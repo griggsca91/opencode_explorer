@@ -1,10 +1,13 @@
 use color_eyre::Result;
-use crossterm::event::{self, KeyCode};
+use crossterm::event::{self, KeyCode, poll};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Row, Table, TableState};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug)]
 struct Message {
@@ -23,6 +26,8 @@ struct SessionRequestCount {
 }
 
 fn main() -> Result<()> {
+    let (tx, rx) = mpsc::channel::<Vec<SessionRequestCount>>();
+
     color_eyre::install()?;
     let mut table_state = TableState::default();
     table_state.select_first();
@@ -32,39 +37,60 @@ fn main() -> Result<()> {
         table_state: table_state,
         items: vec![],
     };
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(1));
+            let conn = rusqlite::Connection::open("/Users/chris/.local/share/opencode/opencode.db")
+                .unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "select max(time_updated) as time_updated, session_id, count(1)
+from message
+where data ->> 'role' == 'user'
+group by session_id
+order by time_updated desc
+limit 10;",
+                )
+                .unwrap();
+            let person_iter = stmt
+                .query_map([], |row| {
+                    Ok(SessionRequestCount {
+                        session_id: row.get(1)?,
+                        count: row.get(2)?,
+                    })
+                })
+                .unwrap()
+                .map(|i| i.unwrap());
 
-    let conn = rusqlite::Connection::open("/Users/chris/.local/share/opencode/opencode.db")?;
-    let mut stmt = conn.prepare("select session_id, count(1) from message where data->>'role' == 'user' group by session_id;")?;
-    let person_iter = stmt.query_map([], |row| {
-        Ok(SessionRequestCount {
-            session_id: row.get(0)?,
-            count: row.get(1)?,
-        })
-    })?;
-
-    for person in person_iter {
-        match person {
-            Ok(m) => oe_table_state.items.push(m),
-            _ => {}
+            tx.send(person_iter.collect()).unwrap();
         }
-    }
+    });
 
     ratatui::run(|terminal| {
         loop {
+            if let Ok(result) = rx.try_recv() {
+                oe_table_state.items.clear();
+                for person in result {
+                    oe_table_state.items.push(person);
+                }
+            }
             terminal.draw(|frame| render(frame, &mut oe_table_state))?;
-            if let Some(key) = event::read()?.as_key_press_event() {
-                let mut table_state = oe_table_state.table_state;
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('j') | KeyCode::Down => table_state.select_next(),
-                    KeyCode::Char('k') | KeyCode::Up => table_state.select_previous(),
-                    KeyCode::Char('l') | KeyCode::Right => table_state.select_next_column(),
-                    KeyCode::Char('h') | KeyCode::Left => table_state.select_previous_column(),
-                    KeyCode::Char('g') => table_state.select_first(),
-                    KeyCode::Char('G') => table_state.select_last(),
-                    _ => {}
-                };
-                oe_table_state.table_state = table_state;
+
+            if poll(Duration::from_millis(100))? {
+                if let Some(key) = event::read()?.as_key_press_event() {
+                    let mut table_state = oe_table_state.table_state;
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Char('j') | KeyCode::Down => table_state.select_next(),
+                        KeyCode::Char('k') | KeyCode::Up => table_state.select_previous(),
+                        KeyCode::Char('l') | KeyCode::Right => table_state.select_next_column(),
+                        KeyCode::Char('h') | KeyCode::Left => table_state.select_previous_column(),
+                        KeyCode::Char('g') => table_state.select_first(),
+                        KeyCode::Char('G') => table_state.select_last(),
+                        _ => {}
+                    };
+                    oe_table_state.table_state = table_state;
+                }
             }
         }
     })
