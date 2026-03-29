@@ -53,6 +53,7 @@ fn main() -> Result<()> {
         loop {
             terminal.draw(|frame| render(frame, &mut oe_table_state))?;
             if let Some(key) = event::read()?.as_key_press_event() {
+                let mut table_state = oe_table_state.table_state;
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char('j') | KeyCode::Down => table_state.select_next(),
@@ -62,7 +63,8 @@ fn main() -> Result<()> {
                     KeyCode::Char('g') => table_state.select_first(),
                     KeyCode::Char('G') => table_state.select_last(),
                     _ => {}
-                }
+                };
+                oe_table_state.table_state = table_state;
             }
         }
     })
