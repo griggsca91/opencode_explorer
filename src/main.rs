@@ -14,7 +14,12 @@ struct Message {
 
 struct OETableState {
     table_state: TableState,
-    items: Vec<Message>,
+    items: Vec<SessionRequestCount>,
+}
+
+struct SessionRequestCount {
+    session_id: String,
+    count: i32,
 }
 
 fn main() -> Result<()> {
@@ -29,11 +34,11 @@ fn main() -> Result<()> {
     };
 
     let conn = rusqlite::Connection::open("/Users/chris/.local/share/opencode/opencode.db")?;
-    let mut stmt = conn.prepare("SELECT id, data FROM message limit 10")?;
+    let mut stmt = conn.prepare("select session_id, count(1) from message where data->>'role' == 'user' group by session_id;")?;
     let person_iter = stmt.query_map([], |row| {
-        Ok(Message {
-            id: row.get(0)?,
-            data: row.get(1)?,
+        Ok(SessionRequestCount {
+            session_id: row.get(0)?,
+            count: row.get(1)?,
         })
     })?;
 
@@ -85,7 +90,7 @@ pub fn render_table(frame: &mut Frame, area: Rect, oe_table_state: &mut OETableS
     let rows = oe_table_state
         .items
         .iter()
-        .map(|i| Row::new([i.id.clone(), i.data.clone()]));
+        .map(|i| Row::new([i.session_id.clone(), i.count.to_string()]));
 
     let footer = Row::new([
         "Ratatouille Recipe",
