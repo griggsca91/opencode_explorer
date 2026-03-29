@@ -21,6 +21,7 @@ struct OETableState {
 }
 
 struct SessionRequestCount {
+    session_title: String,
     session_id: String,
     count: i32,
 }
@@ -44,17 +45,18 @@ fn main() -> Result<()> {
                 .unwrap();
             let mut stmt = conn
                 .prepare(
-                    "select max(time_updated) as time_updated, session_id, count(1)
-from message
-where data ->> 'role' == 'user'
-group by session_id
-order by time_updated desc
-limit 10;",
+                    "select s.title, m.session_id, count(1)
+from message m
+join session s on m.session_id = s.id
+where m.data ->> 'role' == 'user'
+group by m.session_id
+order by max(m.time_updated) desc limit 10;",
                 )
                 .unwrap();
             let person_iter = stmt
                 .query_map([], |row| {
                     Ok(SessionRequestCount {
+                        session_title: row.get(0)?,
                         session_id: row.get(1)?,
                         count: row.get(2)?,
                     })
@@ -115,10 +117,13 @@ pub fn render_table(frame: &mut Frame, area: Rect, oe_table_state: &mut OETableS
         .style(Style::new().bold())
         .bottom_margin(1);
 
-    let rows = oe_table_state
-        .items
-        .iter()
-        .map(|i| Row::new([i.session_id.clone(), i.count.to_string()]));
+    let rows = oe_table_state.items.iter().map(|i| {
+        Row::new([
+            i.session_id.clone(),
+            i.session_title.clone(),
+            i.count.to_string(),
+        ])
+    });
 
     let footer = Row::new([
         "Ratatouille Recipe",
