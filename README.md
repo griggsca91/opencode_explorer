@@ -25,9 +25,14 @@ group by m.session_id
 order by max(m.time_updated) desc limit 10;
 ```
 
+## Model Price
+
+<https://docs.github.com/en/copilot/reference/ai-models/supported-models#model-multipliers>
+
 ## Usage
 
 Build and run with:
+
 ```bash
 cargo run --release
 ```

@@ -6,7 +6,6 @@ export const MyPlugin: Plugin = async ({ project, client, $, directory, worktree
   // Replace the global fetch with a wrapper
   globalThis.fetch = async function (...args) {
     const [url, options] = args;
-    console.log(`Fetch request started for: ${url}`); // Action before fetch
 
     try {
       const response = await originalFetch(...args);

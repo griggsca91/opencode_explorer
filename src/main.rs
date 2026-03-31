@@ -1,10 +1,14 @@
 use color_eyre::Result;
+use core::fmt::{self, Display};
 use crossterm::event::{self, KeyCode, poll};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Row, Table, TableState};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
+use std::error::{self, Error};
+use std::str::FromStr;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -23,6 +27,9 @@ struct OETableState {
 struct SessionRequestCount {
     session_title: String,
     session_id: String,
+    message_id: String,
+    provider: String,
+    model: String,
     count: i32,
 }
 
@@ -45,12 +52,20 @@ fn main() -> Result<()> {
                 .unwrap();
             let mut stmt = conn
                 .prepare(
-                    "select s.title, m.session_id, count(1)
+                    "
+select s.title,
+       m.session_id,
+       m.data ->> 'providerID',
+       m.data ->> 'modelID',
+       coalesce(m.data ->> 'parentID', m.id) as message_id,
+       count(1)
 from message m
-join session s on m.session_id = s.id
-where m.data ->> 'role' == 'user'
-group by m.session_id
-order by max(m.time_updated) desc limit 10;",
+         join session s on m.session_id = s.id
+where m.data ->> 'role' != 'user'
+group by m.session_id, message_id, m.data ->> 'providerID', m.data ->> 'modelID'
+order by max(s.time_updated) desc
+limit 100;
+",
                 )
                 .unwrap();
             let person_iter = stmt
@@ -58,7 +73,10 @@ order by max(m.time_updated) desc limit 10;",
                     Ok(SessionRequestCount {
                         session_title: row.get(0)?,
                         session_id: row.get(1)?,
-                        count: row.get(2)?,
+                        provider: row.get(2)?,
+                        model: row.get(3)?,
+                        message_id: row.get(4)?,
+                        count: row.get(5)?,
                     })
                 })
                 .unwrap()
@@ -113,31 +131,27 @@ fn render(frame: &mut Frame, table_state: &mut OETableState) {
 
 /// Render a table with some rows and columns.
 pub fn render_table(frame: &mut Frame, area: Rect, oe_table_state: &mut OETableState) {
-    let header = Row::new(["Ingredient", "Quantity", "Macros"])
+    let header = Row::new(["Message ID", "Title", "Model", "Requests"])
         .style(Style::new().bold())
         .bottom_margin(1);
 
     let rows = oe_table_state.items.iter().map(|i| {
         Row::new([
-            i.session_id.clone(),
+            i.message_id.clone(),
             i.session_title.clone(),
+            format!("{} - {}", i.provider, i.model),
             i.count.to_string(),
         ])
     });
 
-    let footer = Row::new([
-        "Ratatouille Recipe",
-        "",
-        "135 kcal, 31g carbs, 6.4g protein",
-    ]);
     let widths = [
         Constraint::Percentage(30),
         Constraint::Percentage(20),
-        Constraint::Percentage(50),
+        Constraint::Percentage(15),
+        Constraint::Percentage(15),
     ];
     let table = Table::new(rows, widths)
         .header(header)
-        .footer(footer.italic())
         .column_spacing(1)
         .style(Color::White)
         .row_highlight_style(Style::new().on_black().bold())
